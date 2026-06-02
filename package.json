@@ -15,19 +15,24 @@
   "tish": {
     "module": "./src/index.tish"
   },
-  "main": "./src/index.tish",
+  "main": "./dist/index.js",
   "exports": {
     ".": {
       "tish": "./src/index.tish",
-      "default": "./src/index.tish"
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./sw": {
       "tish": "./src/sw_worker.tish",
-      "default": "./src/sw_worker.tish"
+      "import": "./dist/sw_worker.js",
+      "require": "./dist/sw_worker.js",
+      "default": "./dist/sw_worker.js"
     }
   },
   "files": [
     "src/",
+    "dist/",
     "README.md"
   ],
   "devDependencies": {
@@ -35,9 +40,17 @@
     "@semantic-release/github": "^12.0.6",
     "@semantic-release/npm": "^13.1.5",
     "@semantic-release/release-notes-generator": "^14.1.0",
-    "semantic-release": "^25.0.3"
+    "semantic-release": "^25.0.3",
+    "@tishlang/tish": "^1.12.0"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "module": "./dist/index.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build",
+    "test": "echo \"No tests yet\""
   }
 }

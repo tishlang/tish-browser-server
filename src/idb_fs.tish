@@ -1,0 +1,124 @@
+// IndexedDB-backed filesystem shim. Compatible with the API surface of the
+// host 'fs' module (readFile / writeFile / fileExists / readDir / mkdir).
+//
+// All values live in a single object store keyed by virtual path. Directories
+// are implicit (a path starting with "foo/" implies foo/ exists). readDir
+// returns the immediate children of a prefix.
+
+const DB_NAME = "tish-browser-server"
+const DB_VERSION = 1
+const STORE = "files"
+
+let dbPromise = null
+
+fn opt(o, key, fallback) {
+  if (key in o) {
+    let v = o[key]
+    if (v !== null) { return v }
+  }
+  return fallback
+}
+
+fn openDb() {
+  if (dbPromise !== null) { return dbPromise }
+  dbPromise = new Promise((resolve, reject) => {
+    let req = indexedDB.open(DB_NAME, DB_VERSION)
+    req.onupgradeneeded = (e) => {
+      let db = req.result
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE)
+      }
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+  return dbPromise
+}
+
+fn requestPromise(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export async fn readFile(path) {
+  let db = await openDb()
+  let tx = db.transaction(STORE, "readonly")
+  let store = tx.objectStore(STORE)
+  let v = await requestPromise(store.get(path))
+  if (v === null || v === undefined) {
+    return { error: "ENOENT: no such file or directory, open '" + path + "'" }
+  }
+  return v
+}
+
+export async fn writeFile(path, content) {
+  let db = await openDb()
+  let tx = db.transaction(STORE, "readwrite")
+  let store = tx.objectStore(STORE)
+  await requestPromise(store.put(content, path))
+  return null
+}
+
+export async fn fileExists(path) {
+  let db = await openDb()
+  let tx = db.transaction(STORE, "readonly")
+  let store = tx.objectStore(STORE)
+  let key = await requestPromise(store.getKey(path))
+  return key !== null && key !== undefined
+}
+
+export async fn readDir(path) {
+  let prefix = path
+  if (prefix.length > 0 && prefix.charAt(prefix.length - 1) !== "/") {
+    prefix = prefix + "/"
+  }
+  if (prefix === "/" || prefix === "./") { prefix = "" }
+  let db = await openDb()
+  let tx = db.transaction(STORE, "readonly")
+  let store = tx.objectStore(STORE)
+  let allKeys = await requestPromise(store.getAllKeys())
+  let seen = {}
+  let out = []
+  let i = 0
+  while (i < allKeys.length) {
+    let k = allKeys[i]
+    if (typeof k === "string" && (prefix === "" || k.indexOf(prefix) === 0)) {
+      let rest = k.substring(prefix.length)
+      let slash = rest.indexOf("/")
+      let entry = slash < 0 ? rest : rest.substring(0, slash)
+      if (entry.length > 0 && !(entry in seen)) {
+        seen[entry] = true
+        out.push(entry)
+      }
+    }
+    i = i + 1
+  }
+  return out
+}
+
+export async fn mkdir(path) {
+  // Directories are implicit; placing a sentinel marker lets readDir surface
+  // empty directories cleanly.
+  let p = path
+  if (p.length > 0 && p.charAt(p.length - 1) !== "/") { p = p + "/" }
+  return writeFile(p + ".keep", "")
+}
+
+export async fn unlink(path) {
+  let db = await openDb()
+  let tx = db.transaction(STORE, "readwrite")
+  let store = tx.objectStore(STORE)
+  await requestPromise(store.delete(path))
+  return null
+}
+
+// Reset the virtual disk (handy for tests / Reset buttons in lessons).
+export async fn clearAll() {
+  let db = await openDb()
+  let tx = db.transaction(STORE, "readwrite")
+  let store = tx.objectStore(STORE)
+  await requestPromise(store.clear())
+  return null
+}

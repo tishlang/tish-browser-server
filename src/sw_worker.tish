@@ -1,0 +1,113 @@
+// Service Worker source. Compiled to JS at build time and served at /tish-sw.js.
+//
+// Responsibilities:
+//   - Listen for `tish-route-set` / `tish-route-clear` messages from the page.
+//     When set, the SW is "live" and intercepts fetch.
+//   - On fetch (within scope, GET/POST/PUT/PATCH/DELETE), forward the request
+//     to the controlling client and await its response, then `respondWith` it.
+//   - Pass through everything else (asset requests, /dist/, etc.).
+//
+// Design: SW context, no DOM. Uses self.* globals. Tish's --target js builds
+// a plain ESM module; SWs are usually classic scripts but most modern browsers
+// also support `type: "module"` SWs. We register with default classic mode.
+
+let live = false
+let nextId = 1
+let pending = {}
+
+fn omitKey(obj, key) {
+  let out = {}
+  let keys = Object.keys(obj)
+  let i = 0
+  while (i < keys.length) {
+    if (keys[i] !== key) { out[keys[i]] = obj[keys[i]] }
+    i = i + 1
+  }
+  return out
+}
+
+self.addEventListener("install", (ev) => {
+  self.skipWaiting()
+})
+
+self.addEventListener("activate", (ev) => {
+  ev.waitUntil(self.clients.claim())
+})
+
+self.addEventListener("message", (ev) => {
+  let msg = ev.data
+  if (msg === null || typeof msg !== "object") { return }
+  let kind = "kind" in msg ? msg["kind"] : null
+  if (kind === "tish-route-set") {
+    live = true
+  } else if (kind === "tish-route-clear") {
+    live = false
+  } else if (kind === "tish-fetch-reply") {
+    let id = msg["id"]
+    if (id in pending) {
+      let resolver = pending[id]
+      pending = omitKey(pending, id)
+      resolver(msg["response"])
+    }
+  }
+})
+
+fn shouldHandle(url) {
+  if (!live) { return false }
+  let u = new URL(url)
+  let p = u.pathname
+  // Don't intercept our own assets.
+  if (p === "/" || p === "/index.html") { return false }
+  if (p.indexOf("/dist/") === 0) { return false }
+  if (p.indexOf("/content/") === 0) { return false }
+  if (p === "/tish-sw.js") { return false }
+  if (p.indexOf("/_") === 0) { return false }
+  return true
+}
+
+async fn askClient(req) {
+  let clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true })
+  if (clients.length === 0) {
+    return { status: 503, body: "No client available" }
+  }
+  let client = clients[0]
+  let id = nextId
+  nextId = nextId + 1
+  let body = ""
+  try {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      body = await req.text()
+    }
+  } catch (e) { body = "" }
+  let headers = {}
+  req.headers.forEach((v, k) => { headers[k] = v })
+  let url = new URL(req.url)
+  let request = {
+    method: req.method,
+    path: url.pathname,
+    query: url.search,
+    headers: headers,
+    body: body
+  }
+  let p = new Promise((resolve) => {
+    pending[id] = resolve
+  })
+  client.postMessage({ kind: "tish-fetch", id: id, request: request })
+  return p
+}
+
+fn buildResponse(r) {
+  let status = "status" in r ? r["status"] : 200
+  let body = "body" in r ? r["body"] : ""
+  let bodyStr = typeof body === "string" ? body : JSON.stringify(body)
+  let headers = "headers" in r ? r["headers"] : {}
+  if (typeof body !== "string" && !("Content-Type" in headers)) {
+    headers["Content-Type"] = "application/json"
+  }
+  return new Response(bodyStr, { status: status, headers: headers })
+}
+
+self.addEventListener("fetch", (ev) => {
+  if (!shouldHandle(ev.request.url)) { return }
+  ev.respondWith(askClient(ev.request).then((r) => buildResponse(r)))
+})

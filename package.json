@@ -1,0 +1,43 @@
+{
+  "name": "@tishlang/tish-browser-server",
+  "version": "0.1.0",
+  "description": "Pure-Tish in-browser shims for the 'http', 'fs', and 'process' modules. Service Worker + BroadcastChannel + IndexedDB. Zero JS deps. Lets capstone code that looks server-shaped run entirely in the learner's tab.",
+  "license": "PIF",
+  "private": false,
+  "homepage": "https://github.com/tishlang/tish-browser-server#readme",
+  "bugs": {
+    "url": "https://github.com/tishlang/tish-browser-server/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tishlang/tish-browser-server.git"
+  },
+  "tish": {
+    "module": "./src/index.tish"
+  },
+  "main": "./src/index.tish",
+  "exports": {
+    ".": {
+      "tish": "./src/index.tish",
+      "default": "./src/index.tish"
+    },
+    "./sw": {
+      "tish": "./src/sw_worker.tish",
+      "default": "./src/sw_worker.tish"
+    }
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/github": "^12.0.6",
+    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/release-notes-generator": "^14.1.0",
+    "semantic-release": "^25.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

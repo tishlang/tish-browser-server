@@ -1,0 +1,126 @@
+// Service-Worker-backed shim of `serve(port, handler)` from 'http'.
+//
+// Architecture:
+//   - The main page registers /tish-sw.js as a Service Worker.
+//   - The page tells the SW which prefix to intercept (e.g. "/api/").
+//   - When the user does `fetch("/api/notes")`, the SW intercepts and
+//     postMessages the request to the page.
+//   - The page runs the user's handler(req) and postMessages the response back.
+//   - The SW resolves FetchEvent.respondWith() with the response.
+//
+// The user writes server code that looks like a real Tish HTTP server:
+//
+//     import { serve } from "@tishlang/tish-browser-server"
+//     serve(8080, (req) => {
+//       if (req.path === "/api/health") return { status: 200, body: "OK" }
+//       return { status: 404, body: "Not Found" }
+//     })
+//
+// The `port` argument is ignored. All routing is by path within the page's origin.
+
+const SW_URL = "/dist/tish-sw.js"
+const SW_SCOPE = "/"
+
+let registration = null
+let registrationPromise = null
+let currentHandler = null
+let pendingReplies = {}
+let nextRequestId = 1
+let messageBound = false
+
+fn ensureMessageBridge() {
+  if (messageBound) { return }
+  messageBound = true
+  navigator.serviceWorker.addEventListener("message", (ev) => {
+    let msg = ev.data
+    if (msg === null || typeof msg !== "object") { return }
+    let kind = "kind" in msg ? msg["kind"] : null
+    if (kind === "tish-fetch") {
+      handleFetchFromSW(msg, ev.source)
+    }
+  })
+}
+
+async fn handleFetchFromSW(msg, source) {
+  let req = msg["request"]
+  let id = msg["id"]
+  let response = { status: 404, body: "Not Found", headers: {} }
+  if (currentHandler !== null) {
+    try {
+      let result = currentHandler(req)
+      // Allow handlers to be async.
+      if (result !== null && typeof result === "object" && "then" in result) {
+        result = await result
+      }
+      if (result !== null && typeof result === "object") {
+        response = result
+      }
+    } catch (e) {
+      response = { status: 500, body: "Internal error: " + String(e), headers: {} }
+    }
+  }
+  if (source !== null && source !== undefined) {
+    source.postMessage({ kind: "tish-fetch-reply", id: id, response: response })
+  }
+}
+
+async fn waitActive(reg) {
+  if (reg.active !== null) { return reg.active }
+  return new Promise((resolve) => {
+    let installing = reg.installing
+    if (installing === null) { installing = reg.waiting }
+    if (installing === null) {
+      // Already done settling between checks.
+      resolve(reg.active)
+      return
+    }
+    installing.addEventListener("statechange", () => {
+      if (reg.active !== null) { resolve(reg.active) }
+    })
+  })
+}
+
+async fn ensureRegistration() {
+  if (registration !== null) { return registration }
+  if (registrationPromise !== null) { return registrationPromise }
+  if (typeof navigator === "undefined" || navigator.serviceWorker === undefined) {
+    throw "Service Worker not available in this browser"
+  }
+  async fn afterRegister(reg) {
+    await waitActive(reg)
+    ensureMessageBridge()
+    registration = reg
+    return reg
+  }
+  registrationPromise = navigator.serviceWorker.register(SW_URL, { scope: SW_SCOPE }).then(afterRegister)
+  return registrationPromise
+}
+
+// Public API: start "serving" by installing a handler. Replaces any previous handler.
+// Returns a Promise that resolves once the SW is active and the handler is registered.
+export async fn serve(port, handler) {
+  currentHandler = handler
+  let reg = await ensureRegistration()
+  let active = reg.active
+  if (active !== null) {
+    active.postMessage({ kind: "tish-route-set", scope: "/" })
+  }
+  // Mirror Tish's serve() shape (returns a small handle so callers can stop later).
+  return {
+    stop: () => {
+      currentHandler = null
+      if (reg.active !== null) {
+        reg.active.postMessage({ kind: "tish-route-clear" })
+      }
+    }
+  }
+}
+
+// Convenience for unit tests: process a synthetic request through the current
+// handler without going through the SW. Returns the same response shape.
+export async fn dispatch(req) {
+  if (currentHandler === null) { return { status: 404, body: "Not Found" } }
+  let r = currentHandler(req)
+  if (r !== null && typeof r === "object" && "then" in r) { r = await r }
+  return r
+}

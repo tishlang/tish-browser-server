@@ -1,0 +1,74 @@
+// BroadcastChannel-backed WebSocket-like shim. Same onopen / onmessage /
+// onclose / onerror / send / close surface as the WebSocket API.
+//
+// URL convention:
+//   bc://<channel-name>     — every tab on the same origin that constructs a
+//                             socket on the same channel-name will see each
+//                             other's messages. This is the two-tab chat /
+//                             whiteboard pattern.
+//
+// The shim does not attempt cross-device sync. For that, lessons can layer a
+// WebRTC paste-the-offer flow on top (see capstones/whiteboard).
+
+const READYSTATE_CONNECTING = 0
+const READYSTATE_OPEN = 1
+const READYSTATE_CLOSING = 2
+const READYSTATE_CLOSED = 3
+
+fn parseChannel(url) {
+  let u = String(url)
+  if (u.indexOf("bc://") === 0) {
+    return u.substring(5)
+  }
+  return u
+}
+
+// Construct an object that quacks like a WebSocket. The caller assigns
+// onopen / onmessage / onclose / onerror as functions; we invoke them as
+// the BroadcastChannel emits messages.
+export fn createBcWebSocket(url) {
+  let channelName = parseChannel(url)
+  let bc = new BroadcastChannel(channelName)
+  let socket = {}
+  socket.url = url
+  socket.readyState = READYSTATE_CONNECTING
+  socket.onopen = null
+  socket.onmessage = null
+  socket.onclose = null
+  socket.onerror = null
+  socket.bufferedAmount = 0
+
+  bc.onmessage = (ev) => {
+    if (socket.readyState !== READYSTATE_OPEN) { return }
+    if (socket.onmessage !== null) {
+      // Mimic MessageEvent shape.
+      socket.onmessage({ data: ev.data, type: "message" })
+    }
+  }
+
+  socket.send = (data) => {
+    if (socket.readyState !== READYSTATE_OPEN) {
+      if (socket.onerror !== null) { socket.onerror({ type: "error", message: "socket not open" }) }
+      return
+    }
+    bc.postMessage(data)
+  }
+
+  socket.close = () => {
+    if (socket.readyState === READYSTATE_CLOSED) { return }
+    socket.readyState = READYSTATE_CLOSING
+    bc.close()
+    socket.readyState = READYSTATE_CLOSED
+    if (socket.onclose !== null) { socket.onclose({ type: "close", code: 1000, reason: "" }) }
+  }
+
+  // Open asynchronously so callers have a chance to wire onopen first.
+  setTimeout(() => {
+    if (socket.readyState === READYSTATE_CONNECTING) {
+      socket.readyState = READYSTATE_OPEN
+      if (socket.onopen !== null) { socket.onopen({ type: "open" }) }
+    }
+  }, 0)
+
+  return socket
+}

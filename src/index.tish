@@ -1,0 +1,60 @@
+// tish-browser-server — public API.
+//
+// Drop-in replacements for the host 'http', 'fs', and 'process' modules,
+// implemented entirely in the browser tab via Service Worker, BroadcastChannel,
+// and IndexedDB. Use this in capstone-style lessons that want server-shaped
+// code to "just work" without any backend.
+//
+// Take-it-real diff:
+//
+//   - import { serve } from "@tishlang/tish-browser-server"
+//   + import { serve } from "http"
+//
+//   - import { readFile, writeFile } from "@tishlang/tish-browser-server"
+//   + import { readFile, writeFile } from "fs"
+//
+// Same API surface either way.
+
+import { serve as _serve, dispatch as _dispatch } from "./sw_serve.tish"
+import { createBcWebSocket as _createBcWebSocket } from "./bc_websocket.tish"
+import {
+  readFile as _readFile,
+  writeFile as _writeFile,
+  fileExists as _fileExists,
+  readDir as _readDir,
+  mkdir as _mkdir,
+  unlink as _unlink,
+  clearAll as _clearAll
+} from "./idb_fs.tish"
+import { process as _process, getProcess as _getProcess, setOnExit as _setOnExit } from "./process_mock.tish"
+
+export const serve = _serve
+export const dispatch = _dispatch
+export const createBcWebSocket = _createBcWebSocket
+
+export const readFile = _readFile
+export const writeFile = _writeFile
+export const fileExists = _fileExists
+export const readDir = _readDir
+export const mkdir = _mkdir
+export const unlink = _unlink
+export const clearAll = _clearAll
+
+export const process = _process
+export const getProcess = _getProcess
+export const setOnExit = _setOnExit
+
+// Native browser fetch is just the global; re-exporting for symmetry with 'http'.
+export fn fetch(url, opts) {
+  if (opts === null || opts === undefined) { return window.fetch(url) }
+  return window.fetch(url, opts)
+}
+
+// Browser-native WebSocket for true network sockets. Use createBcWebSocket()
+// for cross-tab BroadcastChannel-backed sockets.
+export fn nativeWebSocket(url, protocols) {
+  if (protocols === null || protocols === undefined) {
+    return new WebSocket(url)
+  }
+  return new WebSocket(url, protocols)
+}

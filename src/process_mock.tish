@@ -1,0 +1,88 @@
+// In-browser mock of `process.env`, `process.argv`, `process.cwd`, `process.exit`.
+//
+// env  : merge of localStorage[`tish-process-env`] (JSON) and `?env.KEY=VALUE`
+//        query params, the latter overriding.
+// argv : the `?argv=foo,bar,baz` query param, split on commas.
+// cwd  : "/" by default; can be overridden via `?cwd=/some/path`.
+// exit : a no-op that calls onExit (set by the host page) so simulated CLIs
+//        can react.
+
+fn parseQuery() {
+  let q = {}
+  if (typeof location === "undefined") { return q }
+  let s = location.search
+  if (s === null || s === undefined || s.length < 2) { return q }
+  let body = s.substring(1)
+  let pairs = body.split("&")
+  let i = 0
+  while (i < pairs.length) {
+    let kv = pairs[i].split("=")
+    if (kv.length === 2) {
+      let k = decodeURI(kv[0])
+      let v = decodeURI(kv[1])
+      q[k] = v
+    }
+    i = i + 1
+  }
+  return q
+}
+
+fn buildEnv(query) {
+  let env = {}
+  try {
+    let raw = localStorage.getItem("tish-process-env")
+    if (raw !== null) {
+      let parsed = JSON.parse(raw)
+      let keys = Object.keys(parsed)
+      let i = 0
+      while (i < keys.length) {
+        env[keys[i]] = parsed[keys[i]]
+        i = i + 1
+      }
+    }
+  } catch (e) { }
+  let qkeys = Object.keys(query)
+  let j = 0
+  while (j < qkeys.length) {
+    let k = qkeys[j]
+    if (k.indexOf("env.") === 0) {
+      env[k.substring(4)] = query[k]
+    }
+    j = j + 1
+  }
+  return env
+}
+
+fn buildArgv(query) {
+  if ("argv" in query && query["argv"] !== null) {
+    return query["argv"].split(",")
+  }
+  return []
+}
+
+let onExitHandler = null
+
+export fn setOnExit(handler) {
+  onExitHandler = handler
+}
+
+let cachedProcess = null
+
+fn buildProcess() {
+  let q = parseQuery()
+  let p = {}
+  p.env = buildEnv(q)
+  p.argv = buildArgv(q)
+  p.cwd = "cwd" in q && q["cwd"] !== null ? q["cwd"] : "/"
+  p.exit = (code) => {
+    if (onExitHandler !== null) { onExitHandler(code !== null && code !== undefined ? code : 0) }
+  }
+  return p
+}
+
+export fn getProcess() {
+  if (cachedProcess === null) { cachedProcess = buildProcess() }
+  return cachedProcess
+}
+
+export const process = getProcess()

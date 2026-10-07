@@ -83,4 +83,4 @@ The host page must serve the worker script at `/dist/tish-sw.js`. In tish-learn 
 
 ## License
 
-[PIF](LICENSE)
+[MIT](LICENSE)

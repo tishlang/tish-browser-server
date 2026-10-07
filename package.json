@@ -2,7 +2,7 @@
   "name": "@tishlang/tish-browser-server",
   "version": "0.1.0",
   "description": "Pure-Tish in-browser shims for the 'http', 'fs', and 'process' modules. Service Worker + BroadcastChannel + IndexedDB. Zero JS deps. Lets capstone code that looks server-shaped run entirely in the learner's tab.",
-  "license": "PIF",
+  "license": "MIT",
   "private": false,
   "homepage": "https://github.com/tishlang/tish-browser-server#readme",
   "bugs": {
